@@ -1,0 +1,110 @@
+---
+title: "Total Phosphorus Data Analysis"
+author: "Katie L. Duggan"
+date: "9/30/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Install packages and load libraries
+
+```{r, warning=FALSE, message=FALSE}
+#install.packages() as needed
+library(tidyverse)
+library(knitr)
+library(lubridate)
+library(ggplot2)
+#install.packages("patchwork")
+#install.packages("hrbrthemes")
+library(patchwork)
+library(hrbrthemes)
+```
+
+
+## Run 1
+
+```{r}
+#read in the data (one file is from winflow, the other is a sample key I created to keep track of which sample was put in each autoclave tube and whether it was inlet or outlet)
+
+#Winflow output 
+#(copy/paste .txt content into Excel, delete first few rows, MS/stat rows, and first column, save as .csv)
+run1_winflow_output <- read.csv("C:/github/PLSCI7202/RUN1_p-analyzer_output.csv")
+
+#Sample key
+run1_key <- read_csv("C:/github/PLSCI7202/RUN1_samplekey.csv", 
+                     col_types = cols(name = col_character(), 
+                                      ISCO_date = col_date(format = "%m/%d/%Y"), #tell R your current format so it can fix
+                                      ISCO_time = col_time(format = "%H:%M")))
+
+head(run1_winflow_output)
+head(run1_key)
+
+#clean and reorganize
+run1_winflow <- run1_winflow_output %>%
+  select(-Time, -Cup, -Height, -Flags) %>% #removes columns we don't need
+  rename(name = Name, p_conc = Calc.) #renames the columns we want
+head(run1_winflow)
+
+run1_key2 <- run1_key %>% 
+  unite(ISCO_datetime, c(ISCO_date, ISCO_time), sep = " ") %>%  #combine date and time
+  type_convert(col_types = cols(ISCO_datetime = col_datetime(format = "%Y-%m-%d %H:%M:%S"), name = col_character()))
+head(run1_key2)
+
+#combine tables
+run1 <- left_join(run1_key2, run1_winflow, by = "name")
+head(run1)
+
+#plots
+run1 %>% 
+  filter(!sample_type == "DI") %>% 
+  ggplot(mapping = aes(x = ISCO_datetime, y = p_conc, color = sample_type)) +
+  geom_point()
+```
+
+
+## Flow Data
+
+```{r}
+#read in data
+waterdata <- read_csv("C:/github/PLSCI7202/ongoing_flow_data.csv",
+                     col_types = cols(date = col_date(format = "%m/%d/%Y"), #tell R your current format so it can fix
+                                      time = col_time(format = "%H:%M")))
+
+#clean and reorganize
+waterdata2 <- waterdata %>% 
+  unite(flow_datetime, c(date, time), sep = " ") %>%  #combine date and time
+  type_convert(col_types = cols(flow_datetime = col_datetime(format = "%Y-%m-%d %H:%M:%S")))
+head(waterdata2)
+
+flowdata <- waterdata2 %>% 
+  mutate(convert_offset = (outlet_lvl_ft*30.48)+3.5) %>% 
+  mutate(Q_flow = 0.0065*((convert_offset-45.075)+1.02)^2.5) %>% 
+  mutate(Q_flow = ifelse(is.na(Q_flow), 0, Q_flow))
+head(flowdata)
+```
+
+
+## Cumulative Data
+
+```{r, message=FALSE}
+#plots
+plotdata <- run1 %>% 
+  #filter(!sample_type == "DI") %>% 
+  filter(!sample_type == "1ppm") %>% 
+  filter(!sample_type == "5ppm") 
+
+plot %>% 
+  ggplot(data = plotdata, mapping = aes(x = ISCO_datetime, y = p_conc, color = sample_type)) +
+  geom_point() +
+  geom_line(data = flowdata, mapping = aes(x = flow_datetime, y = Q_flow), color = "blue") +
+  scale_y_continuous(name = "Total Phosphorus (mg/L)", sec.axis = sec_axis(trans = ~., name = "Flow (units)")) +
+  ggtitle("Bioreactor Flow Data and Total Phosphorus") +
+  xlab("Sample Collection Date & Time") +
+  theme_light()
+```
+
+
